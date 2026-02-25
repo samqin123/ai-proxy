@@ -3,8 +3,7 @@ import { cors } from "hono/cors"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { logger } from "hono/logger"
-import { proxy } from 'hono/proxy'
-
+import { proxy } from "hono/proxy"
 
 const app = new Hono()
 
@@ -89,6 +88,14 @@ const proxies: { pathSegment: string; target: string; orHostname?: string }[] =
       pathSegment: "xai",
       target: "https://api.x.ai",
     },
+    {
+      pathSegment: "cerebras",
+      target: "https://api.cerebras.ai",
+    },
+    {
+      pathSegment: "googleapis-cloudcode-pa",
+      target: "https://cloudcode-pa.googleapis.com",
+    },
   ]
 
 app.post(
@@ -125,25 +132,33 @@ app.use(async (c, next) => {
   )
 
   if (proxy) {
-    const headers = new Headers(c.req.raw.headers)
-    if (proxy.pathSegment === "anthropic") {
-      headers.delete("origin")
-    }
-    headers.delete('content-length')
-    headers.delete('host')
+    const headers = new Headers()
+    headers.set("host", new URL(proxy.target).hostname)
 
-    const res = await fetchWithTimeout(
-      `${proxy.target}${url.pathname.replace(
-        `/${proxy.pathSegment}/`,
-        "/",
-      )}${url.search}`,
-      {
-        method: c.req.method,
-        headers,
-        body: c.req.raw.body,
-        timeout: 60000,
-      },
-    )
+    c.req.raw.headers.forEach((value, key) => {
+      const k = key.toLowerCase()
+      if (
+        !k.startsWith("cf-") &&
+        !k.startsWith("x-forwarded-") &&
+        !k.startsWith("cdn-") &&
+        k !== "x-real-ip" &&
+        k !== "host"
+      ) {
+        headers.set(key, value)
+      }
+    })
+
+    const targetUrl = `${proxy.target}${url.pathname.replace(
+      `/${proxy.pathSegment}/`,
+      "/",
+    )}${url.search}`
+
+    const res = await fetchWithTimeout(targetUrl, {
+      method: c.req.method,
+      headers,
+      body: c.req.raw.body,
+      timeout: 60000,
+    })
 
     return new Response(res.body, {
       headers: res.headers,
